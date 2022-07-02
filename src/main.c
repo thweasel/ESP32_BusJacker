@@ -10,13 +10,13 @@
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
 #include "driver/uart.h"
+#include "driver/spi_master.h"
 
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_system.h"
 
 #include "hal/gpio_hal.h"
-
 
 //
 //  GPIO testing (Tasks)
@@ -96,15 +96,14 @@ void task_tick_rtc(void *ignore)
 #define WAITresetPIN 33
 void WAITreset()
 {
-    
+
     // GPIO_OUT1_REG - BIT2 = GPIO33
     REG_CLR_BIT(GPIO_OUT1_REG, 2);
     REG_SET_BIT(GPIO_OUT1_REG, 2);
 
-    //gpio_set_level(WAITresetPIN, 0);
-    //gpio_set_level(WAITresetPIN, 1);
+    // gpio_set_level(WAITresetPIN, 0);
+    // gpio_set_level(WAITresetPIN, 1);
 }
-
 
 //
 //  xQueue Messaging system
@@ -123,7 +122,7 @@ void sendMessage(int32_t ID, char *message)
 {
     AMessage testMessage;
     testMessage.ucMessageID = ID;
-    strcpy(testMessage.ucData, message);
+    strncpy(testMessage.ucData, message, 20);
     xQueueSend(messageQueue, (void *)&testMessage, 1);
 }
 
@@ -138,7 +137,6 @@ void sendAddress(int32_t ID, uint16_t address)
     strcat(testMessage.ucData, "\n");
     xQueueSend(messageQueue, &testMessage, 10);
 }
-
 
 //
 //  xQueue Message to Serial Port
@@ -250,6 +248,90 @@ void configGPIO_IRQ(void)
     }
 }
 
+//
+//  SPI S-Reg Input
+//
+spi_host_device_t spiHost = SPI1_HOST;
+spi_device_handle_t *z80handle;
+spi_transaction_t z80ReadBusTransaction;
+
+//
+// SPI Bus Config
+//
+const spi_bus_config_t mySPIBus = {
+    .mosi_io_num = -1,     // Master Out Slave In GPIO (-1 not used)
+    .miso_io_num = GPIO_NUM_19,     // Master In Slave Out (-1 not used)
+    .sclk_io_num = GPIO_NUM_18,     // Spi CLocK signal
+    .quadwp_io_num = -1,   // WP (Write Protect) D2 4-bit mode (-1 not used)
+    .quadhd_io_num = -1,   // HD (HolD) D3 in 4-bit mode (-1 not used)
+    .max_transfer_sz = 24, // Max transfer in bytes. Defaults to 4094 if 0.
+    //.flags = 0,            // Abilities of bus to be checked by the driver
+    //.intr_flags = 0,       // Interrupt flag for the bus to set the priority, and IRAM attribute
+};
+
+//
+// SPI Device Config
+//
+const spi_device_interface_config_t z80device = {
+    .command_bits = 8,     // Command phase bits
+    .address_bits = 16,    // Address phase bits
+    .dummy_bits = 0,       // Padding bits for delay before data bits
+    .mode = 0,             // SPI mode (CPOL,CPHA?)
+    //.duty_cycle_pos = 0,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
+    //.cs_ena_pretrans = 0,  // SPI bit-cycle the CS is active BEFORE Transmission
+    //.cs_ena_posttrans = 0, // SPI bit-cycle the CS is active AFTER Transmission
+
+    .clock_speed_hz = SPI_MASTER_FREQ_8M, // DEBUG - logic analyser 24Mhz max
+    // z80dev.clock_speed_hz = SPI_MASTER_FREQ_80M; // Target speed    
+    
+    //.input_delay_ns = 0, // Max valid data time, between SLCK and MISO
+    .spics_io_num = -1,  // GPIO pin for ChipSelect (-1 not used)
+    //.flags = 0,          // SPI_DEVICE_ * flags?
+    .queue_size = 1,     // Transactions that can be in flight
+
+    //.pre_cb = NULL,  // IRAM callback BEFORE Transmission
+    //.post_cb = NULL, // IRAM callback AFTER Transmission
+};
+
+static char spiBufferTX [1024];
+static char spiBufferRX [1024];
+
+void config_SPIZ80(void)
+{
+
+    //
+    // Transaction struct -- Z80 RECEIVE BUS
+    //
+    z80ReadBusTransaction.flags = 0;
+    z80ReadBusTransaction.cmd = 8;      // Command bits
+    z80ReadBusTransaction.addr = 16;    // Addr bits
+    z80ReadBusTransaction.length = 8;   // Total Data bits
+    z80ReadBusTransaction.rxlength = 8; // Total Data Received in bits (less than total data bits) [0 = length]
+    // z80ReadBusTransaction.user = NULL;  // Void pointer for "User defined" E.G TransactionID
+
+    z80ReadBusTransaction.tx_buffer = &spiBufferTX;
+    // z80transaction.tx_data=NULL; // < If SPI_TRANS_USE_TXDATA is set, data set here is sent directly from this variable.
+
+    z80ReadBusTransaction.rx_buffer = &spiBufferRX;
+    // z80transaction.rx_data=NULL;  // < If SPI_TRANS_USE_RXDATA is set, data is received directly to this variable
+
+    //
+    // INIT
+    //
+
+    uint8_t result;
+
+    result = spi_bus_initialize(spiHost, &mySPIBus, SPI_DMA_CH_AUTO);
+    sendMessage(result, "spi_bus_initialize\n");
+
+    result = spi_bus_add_device(spiHost, &z80device, z80handle);
+    sendMessage(result, "spi_bus_add_device\n");
+}
+
+void spi_ReadZ80Bus(void)
+{
+}
+
 void app_main()
 {
     gpio_pullup_en(WAITresetPIN);
@@ -258,16 +340,18 @@ void app_main()
     messageQueue = xQueueCreate(QUEUE_LENGTH, QUEUE_ITEM_SIZE);
     xTaskCreate(task_SerialMessageReporter, "uart_echo_task", ECHO_TASK_STACK_SIZE, NULL, 10, NULL);
 
-    vTaskDelay(10);
+    vTaskDelay(100);
 
-    configGPIO_IRQ();
-
-    // gpio_set_level(IRQPIN, 1);
+    // configGPIO_IRQ();
 
     char myMessage[] = "tick\n";
     sendMessage(13, myMessage);
     sendMessage(12, "tock\n");
     sendAddress(10, 65000);
+
+    config_SPIZ80();
+
+    // gpio_set_level(IRQPIN, 1);
 
     // Testing GPIO speeds
     // xTaskCreate(&task_directREG, "tick_gpio", 2048, NULL, 1, NULL);
