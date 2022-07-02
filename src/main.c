@@ -251,20 +251,20 @@ void configGPIO_IRQ(void)
 //
 //  SPI S-Reg Input
 //
-spi_host_device_t spiHost = SPI1_HOST;
-spi_device_handle_t *z80handle;
+spi_host_device_t spiHost_device = HSPI_HOST;
+spi_device_handle_t z80handle;
 spi_transaction_t z80ReadBusTransaction;
 
 //
 // SPI Bus Config
 //
-const spi_bus_config_t mySPIBus = {
-    .mosi_io_num = -1,     // Master Out Slave In GPIO (-1 not used)
-    .miso_io_num = GPIO_NUM_19,     // Master In Slave Out (-1 not used)
-    .sclk_io_num = GPIO_NUM_18,     // Spi CLocK signal
-    .quadwp_io_num = -1,   // WP (Write Protect) D2 4-bit mode (-1 not used)
-    .quadhd_io_num = -1,   // HD (HolD) D3 in 4-bit mode (-1 not used)
-    .max_transfer_sz = 24, // Max transfer in bytes. Defaults to 4094 if 0.
+const spi_bus_config_t mySPIBus_config = {
+    .mosi_io_num = GPIO_NUM_23, // Master Out Slave In GPIO (-1 not used)
+    .miso_io_num = GPIO_NUM_18, // Master In Slave Out (-1 not used)
+    .sclk_io_num = GPIO_NUM_19, // Spi CLocK signal
+    .quadwp_io_num = -1,        // WP (Write Protect) D2 4-bit mode (-1 not used)
+    .quadhd_io_num = -1,        // HD (HolD) D3 in 4-bit mode (-1 not used)
+    .max_transfer_sz = 24,      // Max transfer in bytes. Defaults to 4094 if 0.
     //.flags = 0,            // Abilities of bus to be checked by the driver
     //.intr_flags = 0,       // Interrupt flag for the bus to set the priority, and IRAM attribute
 };
@@ -272,29 +272,29 @@ const spi_bus_config_t mySPIBus = {
 //
 // SPI Device Config
 //
-const spi_device_interface_config_t z80device = {
-    .command_bits = 8,     // Command phase bits
-    .address_bits = 16,    // Address phase bits
-    .dummy_bits = 0,       // Padding bits for delay before data bits
-    .mode = 0,             // SPI mode (CPOL,CPHA?)
+const spi_device_interface_config_t z80device_config = {
+    .command_bits = 8,  // Command phase bits
+    .address_bits = 16, // Address phase bits
+    .dummy_bits = 0,    // Padding bits for delay before data bits
+    .mode = 0,          // SPI mode (CPOL,CPHA?)
     //.duty_cycle_pos = 0,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
     //.cs_ena_pretrans = 0,  // SPI bit-cycle the CS is active BEFORE Transmission
     //.cs_ena_posttrans = 0, // SPI bit-cycle the CS is active AFTER Transmission
 
     .clock_speed_hz = SPI_MASTER_FREQ_8M, // DEBUG - logic analyser 24Mhz max
-    // z80dev.clock_speed_hz = SPI_MASTER_FREQ_80M; // Target speed    
-    
+    // z80dev.clock_speed_hz = SPI_MASTER_FREQ_80M; // Target speed
+
     //.input_delay_ns = 0, // Max valid data time, between SLCK and MISO
-    .spics_io_num = -1,  // GPIO pin for ChipSelect (-1 not used)
+    .spics_io_num = -1, // GPIO pin for ChipSelect (-1 not used)
     //.flags = 0,          // SPI_DEVICE_ * flags?
-    .queue_size = 1,     // Transactions that can be in flight
+    .queue_size = 1, // Transactions that can be in flight
 
     //.pre_cb = NULL,  // IRAM callback BEFORE Transmission
     //.post_cb = NULL, // IRAM callback AFTER Transmission
 };
 
-static char spiBufferTX [1024];
-static char spiBufferRX [1024];
+static uint8_t spiBufferTX[4];
+static uint8_t spiBufferRX[4];
 
 void config_SPIZ80(void)
 {
@@ -318,13 +318,10 @@ void config_SPIZ80(void)
     //
     // INIT
     //
-
     uint8_t result;
-
-    result = spi_bus_initialize(spiHost, &mySPIBus, SPI_DMA_CH_AUTO);
+    result = spi_bus_initialize(spiHost_device, &mySPIBus_config, SPI_DMA_CH_AUTO);
     sendMessage(result, "spi_bus_initialize\n");
-
-    result = spi_bus_add_device(spiHost, &z80device, z80handle);
+    result = spi_bus_add_device(spiHost_device, &z80device_config, &z80handle);
     sendMessage(result, "spi_bus_add_device\n");
 }
 
@@ -350,7 +347,30 @@ void app_main()
     sendAddress(10, 65000);
 
     config_SPIZ80();
+    uint8_t RXbyte[10] ="";
+    spi_transaction_t t = {
+        .cmd = 0,
+        .addr = 0,
+        .length = 16,
+        .rxlength = 16,
+        //.flags = SPI_TRANS_USE_RXDATA,
+        .user = (uint8_t) RXbyte[0],
+    };
 
+    uint8_t result = 0;
+    while (1)
+    {
+        vTaskDelay(100);
+
+        result = spi_device_polling_transmit(z80handle, &t);
+
+        sendMessage(result, "spi_device_poll_tx\n");
+        sendAddress(0, RXbyte[0]);
+        sendAddress(1, RXbyte[1]);
+        sendAddress(2, RXbyte[2]);
+        sendAddress(3, RXbyte[3]);
+        
+    }
     // gpio_set_level(IRQPIN, 1);
 
     // Testing GPIO speeds
