@@ -264,7 +264,7 @@ const spi_bus_config_t mySPIBus_config = {
     .sclk_io_num = GPIO_NUM_19, // Spi CLocK signal
     .quadwp_io_num = -1,        // WP (Write Protect) D2 4-bit mode (-1 not used)
     .quadhd_io_num = -1,        // HD (HolD) D3 in 4-bit mode (-1 not used)
-    .max_transfer_sz = 24,      // Max transfer in bytes. Defaults to 4094 if 0.
+    .max_transfer_sz = 16,      // Max transfer in bytes. Defaults to 4094 if 0.
     //.flags = 0,            // Abilities of bus to be checked by the driver
     //.intr_flags = 0,       // Interrupt flag for the bus to set the priority, and IRAM attribute
 };
@@ -273,18 +273,18 @@ const spi_bus_config_t mySPIBus_config = {
 // SPI Device Config
 //
 const spi_device_interface_config_t z80device_config = {
-    .command_bits = 8,  // Command phase bits
-    .address_bits = 16, // Address phase bits
-    .dummy_bits = 0,    // Padding bits for delay before data bits
-    .mode = 0,          // SPI mode (CPOL,CPHA?)
-    //.duty_cycle_pos = 0,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
+    .command_bits = 0, // Command phase bits
+    .address_bits = 0, // Address phase bits
+    .dummy_bits = 0,   // Padding bits for delay before data bits
+    .mode = 3, // Mode 3 Shift-Regs        // SPI mode (CPOL,CPHA?)
+    .duty_cycle_pos = 64,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
     //.cs_ena_pretrans = 0,  // SPI bit-cycle the CS is active BEFORE Transmission
     //.cs_ena_posttrans = 0, // SPI bit-cycle the CS is active AFTER Transmission
 
-    .clock_speed_hz = SPI_MASTER_FREQ_8M, // DEBUG - logic analyser 24Mhz max
-    // z80dev.clock_speed_hz = SPI_MASTER_FREQ_80M; // Target speed
+    //.clock_speed_hz = SPI_MASTER_FREQ_8M, // DEBUG - logic analyser 24Mhz max
+    .clock_speed_hz = SPI_MASTER_FREQ_20M, // Target speed
 
-    //.input_delay_ns = 0, // Max valid data time, between SLCK and MISO
+    .input_delay_ns = 10, // Max valid data time, between SLCK and MISO
     .spics_io_num = -1, // GPIO pin for ChipSelect (-1 not used)
     //.flags = 0,          // SPI_DEVICE_ * flags?
     .queue_size = 1, // Transactions that can be in flight
@@ -298,15 +298,18 @@ static uint8_t spiBufferRX[4];
 
 void config_SPIZ80(void)
 {
+    gpio_pullup_en(GPIO_NUM_23);
+    gpio_pullup_en(GPIO_NUM_18);
+    gpio_pullup_en(GPIO_NUM_19);
 
     //
     // Transaction struct -- Z80 RECEIVE BUS
     //
     z80ReadBusTransaction.flags = 0;
-    z80ReadBusTransaction.cmd = 8;      // Command bits
-    z80ReadBusTransaction.addr = 16;    // Addr bits
-    z80ReadBusTransaction.length = 8;   // Total Data bits
-    z80ReadBusTransaction.rxlength = 8; // Total Data Received in bits (less than total data bits) [0 = length]
+    z80ReadBusTransaction.cmd = 0;       // Command bits
+    z80ReadBusTransaction.addr = 0;      // Addr bits
+    z80ReadBusTransaction.length = 32;   // Total Data bits
+    z80ReadBusTransaction.rxlength = 32; // Total Data Received in bits (less than total data bits) [0 = length]
     // z80ReadBusTransaction.user = NULL;  // Void pointer for "User defined" E.G TransactionID
 
     z80ReadBusTransaction.tx_buffer = &spiBufferTX;
@@ -347,29 +350,42 @@ void app_main()
     sendAddress(10, 65000);
 
     config_SPIZ80();
-    uint8_t RXbyte[10] ="";
-    spi_transaction_t t = {
-        .cmd = 0,
-        .addr = 0,
+    uint8_t TXbyte[4] = "";
+    uint8_t RXbyte[4] = "";
+    spi_transaction_t t1 = {
+        .cmd = 0xF0,
+        //.addr = 0xE0D0,
+        .tx_buffer = &TXbyte,
+        .rx_buffer = &RXbyte,
         .length = 16,
         .rxlength = 16,
         //.flags = SPI_TRANS_USE_RXDATA,
-        .user = (uint8_t) RXbyte[0],
+        //.user = (uint8_t) RXbyte[0],
     };
 
     uint8_t result = 0;
+    result = spi_device_polling_transmit(z80handle, &t1);
+    sendMessage(result, "spi_device_poll_tx\n");
+    sendAddress(0, RXbyte[0]);
+    sendAddress(1, RXbyte[1]);
+    sendAddress(2, RXbyte[2]);
+    sendAddress(3, RXbyte[3]);
+
+    TXbyte[0] = 0x01;
+    TXbyte[1] = 0x02;
+    TXbyte[2] = 0x03;
+    TXbyte[3] = 0x04;
     while (1)
     {
-        vTaskDelay(100);
+        vTaskDelay(25);
 
-        result = spi_device_polling_transmit(z80handle, &t);
+        result = spi_device_polling_transmit(z80handle, &t1);
 
         sendMessage(result, "spi_device_poll_tx\n");
         sendAddress(0, RXbyte[0]);
         sendAddress(1, RXbyte[1]);
         sendAddress(2, RXbyte[2]);
         sendAddress(3, RXbyte[3]);
-        
     }
     // gpio_set_level(IRQPIN, 1);
 
