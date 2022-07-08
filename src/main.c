@@ -20,28 +20,12 @@
 #include "messageQueue.h"
 
 
-//
-//  Z80 WAIT signal
-//
-
-#define WAITresetPIN 33
-void WAITreset()
-{
-
-    // GPIO_OUT1_REG - BIT2 = GPIO33
-    REG_CLR_BIT(GPIO_OUT1_REG, 2);
-    REG_SET_BIT(GPIO_OUT1_REG, 2);
-
-    // gpio_set_level(WAITresetPIN, 0);
-    // gpio_set_level(WAITresetPIN, 1);
-}
 
 //
-//  SPI S-Reg Interface 
+//  SPI S-Reg Interface
 //
-spi_host_device_t spiHost_device = VSPI_HOST; //HSPI_HOST;
-spi_device_handle_t z80handle;
-spi_transaction_t z80ReadBusTransaction;
+spi_host_device_t spiHost_device = VSPI_HOST; // HSPI_HOST;
+spi_device_handle_t z80device_handle;
 
 //
 // SPI Bus Config
@@ -65,41 +49,74 @@ const spi_device_interface_config_t z80device_config = {
     .command_bits = 0, // Command phase bits
     .address_bits = 0, // Address phase bits
     .dummy_bits = 0,   // Padding bits for delay before data bits
-    .mode = 3, // Mode 3 Shift-Regs        // SPI mode (CPOL,CPHA?)
-   
+    .mode = 3,         // Mode 3 Shift-Regs        // SPI mode (CPOL,CPHA?)
+
     //.clock_speed_hz = SPI_MASTER_FREQ_8M, // DEBUG - logic analyser 24Mhz max
     //.duty_cycle_pos = 64,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
     //.input_delay_ns = 10, // Max valid data time, between SLCK and MISO
-    
+
     /*
     .clock_speed_hz = SPI_MASTER_FREQ_8M, // Target speed
     .duty_cycle_pos = 32,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
     .input_delay_ns = 0, // Max valid data time, between SLCK and MISO
     */
-     
+
     .clock_speed_hz = SPI_MASTER_FREQ_20M, // Target speed
-    .duty_cycle_pos = 128,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
-    .input_delay_ns = 0, // Max valid data time, between SLCK and MISO
-    
+    .duty_cycle_pos = 128,                 // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
+    .input_delay_ns = 0,                   // Max valid data time, between SLCK and MISO
+
     /*
     .clock_speed_hz = SPI_MASTER_FREQ_80M, // Target speed
     .duty_cycle_pos = 64,   // Duty cycle of positive clock in 1/256th (128 = 50/50) [0==128]
     .input_delay_ns = 0, // Max valid data time, between SLCK and MISO
     */
-    
-    .spics_io_num = -1, // GPIO pin for ChipSelect (-1 not used)
-    .flags = SPI_DEVICE_NO_DUMMY,          // SPI_DEVICE_ * flags?  // SPI_DEVICE_HALFDUPLEX
-    .queue_size = 1, // Transactions that can be in flight
-    
+
+    .spics_io_num = -1,           // GPIO pin for ChipSelect (-1 not used)
+    .flags = SPI_DEVICE_NO_DUMMY, // SPI_DEVICE_ * flags?  // SPI_DEVICE_HALFDUPLEX
+    .queue_size = 1,              // Transactions that can be in flight
+
     // Interupt stuff
     //.cs_ena_pretrans = 0,  // SPI bit-cycle the CS is active BEFORE Transmission
     //.cs_ena_posttrans = 0, // SPI bit-cycle the CS is active AFTER Transmission
     //.pre_cb = NULL,  // IRAM callback BEFORE Transmission
     //.post_cb = NULL, // IRAM callback AFTER Transmission
+
+    
+    // FLAG OPTIONS
+    /*
+        SPI_DEVICE_TXBIT_LSBFIRST ///< Transmit command/address/data LSB first instead of the default MSB first
+        SPI_DEVICE_RXBIT_LSBFIRST ///< Receive data LSB first instead of the default MSB first
+        SPI_DEVICE_BIT_LSBFIRST   ///< Transmit and receive LSB first
+        SPI_DEVICE_3WIRE          ///< Use MOSI (=spid) for both sending and receiving data
+        SPI_DEVICE_POSITIVE_CS    ///< Make CS positive during a transaction instead of negative
+        SPI_DEVICE_HALFDUPLEX     ///< Transmit data before receiving it, instead of simultaneously
+        SPI_DEVICE_NO_DUMMY
+        SPI_DEVICE_DDRCLK
+    */
+    // SPI_DEVICE_CLK_AS_CS       ///< Output clock on CS line if CS is active
+    /** There are timing issue when reading at high frequency (the frequency is related to whether iomux pins are used, valid time after slave sees the clock).
+     *     - In half-duplex mode, the driver automatically inserts dummy bits before reading phase to fix the timing issue. Set this flag to disable this feature.
+     *     - In full-duplex mode, however, the hardware cannot use dummy bits, so there is no way to prevent data being read from getting corrupted.
+     *       Set this flag to confirm that you're going to work with output only, or read without dummy bits at your own risk.
+     */
+
 };
 
-static uint8_t spiBufferTX[4];
-static uint8_t spiBufferRX[4];
+//
+//  SPI Transaction
+//
+uint8_t TXbyte[4] = "";
+uint8_t RXbyte[4] = "";
+static spi_transaction_t t1 = {
+    .cmd = 0xF0,
+    //.addr = 0xE0D0,
+    .tx_buffer = &TXbyte,
+    .rx_buffer = &RXbyte,
+    .length = 16,
+    .rxlength = 16,
+    //.flags = SPI_TRANS_USE_RXDATA,
+    //.user = (uint8_t) RXbyte[0],
+};
 
 void config_SPIZ80(void)
 {
@@ -116,7 +133,7 @@ void config_SPIZ80(void)
     sendMessage(result, "spi_bus_initialize\n");
 
     // Add a device to the SPI BUS
-    result = spi_bus_add_device(spiHost_device, &z80device_config, &z80handle);
+    result = spi_bus_add_device(spiHost_device, &z80device_config, &z80device_handle);
     sendMessage(result, "spi_bus_add_device\n");
 }
 
@@ -141,21 +158,9 @@ void app_main()
     sendAddress(10, 65000);
 
     config_SPIZ80();
-    uint8_t TXbyte[4] = "";
-    uint8_t RXbyte[4] = "";
-    spi_transaction_t t1 = {
-        .cmd = 0xF0,
-        //.addr = 0xE0D0,
-        .tx_buffer = &TXbyte,
-        .rx_buffer = &RXbyte,
-        .length = 16,
-        .rxlength = 16,
-        //.flags = SPI_TRANS_USE_RXDATA,
-        //.user = (uint8_t) RXbyte[0],
-    };
 
     uint8_t result = 0;
-    result = spi_device_polling_transmit(z80handle, &t1);
+    result = spi_device_polling_transmit(z80device_handle, &t1);
     sendMessage(result, "spi_device_poll_tx\n");
     sendAddress(0, RXbyte[0]);
     sendAddress(1, RXbyte[1]);
@@ -170,7 +175,7 @@ void app_main()
     {
         vTaskDelay(25);
 
-        result = spi_device_polling_transmit(z80handle, &t1);
+        result = spi_device_polling_transmit(z80device_handle, &t1);
 
         sendMessage(result, "spi_device_poll_tx\n");
         sendAddress(0, RXbyte[0]);

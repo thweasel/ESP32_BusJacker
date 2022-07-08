@@ -1,31 +1,5 @@
 #include "interrupt.h"
 
-//
-//  Z80 WAIT signal
-//
-
-#define WAITresetPIN 33
-void WAITreset()
-{
-
-    // GPIO_OUT1_REG - BIT2 = GPIO33
-    REG_CLR_BIT(GPIO_OUT1_REG, 2);
-    REG_SET_BIT(GPIO_OUT1_REG, 2);
-
-    // gpio_set_level(WAITresetPIN, 0);
-    // gpio_set_level(WAITresetPIN, 1);
-}
-
-//
-//  Latch Bus to Shift Register
-//
-
-#define LOADregPINbit 2 ^ 5 //GPIO 5
-void LOADreg()
-{
-    REG_CLR_BIT(GPIO_OUT_REG, LOADregPINbit);
-    REG_SET_BIT(GPIO_OUT_REG, LOADregPINbit);
-}
 
 //
 //  Interrupt Service
@@ -34,27 +8,12 @@ void LOADreg()
 #define IRQPIN 32
 void IRAM_ATTR myIRQ(void *arg)
 {
-    uint16_t address;
-
-    // Latch Address BUS
-    LOADreg();
-
-    // SPI load Address
-    
-
-    // Merge bytes
-
-
-    // Address
-    sendAddress(0,sendAddress);
-
-
-    WAITreset();
-
     AMessage testMessage;
     testMessage.ucMessageID = IRQPIN;
     strcpy(testMessage.ucData, "IRQ\n");
     xQueueSendFromISR(messageQueue, &testMessage, NULL);
+
+    WAITreset();
 
     // xQueueOverwrite(messageQueue,&testMessage)
     // xQueueOverwriteFromISR(messageQueue, &testMessage,NULL);
