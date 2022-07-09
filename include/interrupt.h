@@ -8,8 +8,13 @@
 
 #include "driver/gpio.h"
 
+
 // Project headers
-#include "messageQueue.h"
+
+
+#define WAITresetPIN 33
+void WAITreset(void);
+
 
 void IRAM_ATTR myIRQ(void *arg);
 void configGPIO_IRQ(void);

@@ -24,7 +24,10 @@ typedef struct A_Message
 } AMessage;
 
 void sendMessage(int32_t ID, char *message);
+void sendMessageISR(int32_t ID, char *message);
+
 void sendAddress(int32_t ID, uint16_t address);
+void sendAddressISR(int32_t ID, uint16_t address);
 
 static void task_SerialMessageReporter(void *arg);
 

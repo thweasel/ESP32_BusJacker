@@ -1,63 +1,79 @@
 #include "interrupt.h"
+#include "z80SPI.h"
+#include "messageQueue.h"
 
-//
-//  Z80 WAIT signal
-//
+uint16_t address = 0;
 
-#define WAITresetPIN 33
-void WAITreset()
-{
 
-    // GPIO_OUT1_REG - BIT2 = GPIO33
-    REG_CLR_BIT(GPIO_OUT1_REG, 2);
-    REG_SET_BIT(GPIO_OUT1_REG, 2);
-
-    // gpio_set_level(WAITresetPIN, 0);
-    // gpio_set_level(WAITresetPIN, 1);
-}
 
 //
 //  Latch Bus to Shift Register
 //
 
-#define LOADregPINbit 2 ^ 5 //GPIO 5
-void LOADreg()
+#define LOADregPINbit (32) // GPIO 5
+void LOADreg(void)
 {
     REG_CLR_BIT(GPIO_OUT_REG, LOADregPINbit);
     REG_SET_BIT(GPIO_OUT_REG, LOADregPINbit);
 }
 
 //
+//  Z80 WAIT signal
+//
+
+// #define WAITresetPIN 33
+void WAITreset(void)
+{
+    REG_CLR_BIT(GPIO_OUT1_REG, 2);
+
+    int16_t i = 0;
+    while (i < 48) // 48
+        i++;
+
+    REG_SET_BIT(GPIO_OUT1_REG, 2);
+}
+
+//
 //  Interrupt Service
 //
 
-#define IRQPIN 32
-void IRAM_ATTR myIRQ(void *arg)
+void task_IRQ(void)
 {
-    uint16_t address;
+    
+    sendMessage(2,"ISR\n");
 
     // Latch Address BUS
     LOADreg();
 
     // SPI load Address
-    
-
-    // Merge bytes
-
+    address = spi_ReadZ80AddressBus();
 
     // Address
-    sendAddress(0,sendAddress);
+    sendAddressISR(0, address);
 
-
+    // release WAIT
     WAITreset();
+    vTaskDelete(NULL);
+}
 
-    AMessage testMessage;
-    testMessage.ucMessageID = IRQPIN;
-    strcpy(testMessage.ucData, "IRQ\n");
-    xQueueSendFromISR(messageQueue, &testMessage, NULL);
+void task_AddressBusRead(void)
+{
+    address = spi_ReadZ80AddressBus();
+    sendAddressISR(0,address);
+    vTaskDelete(NULL);
+}
 
-    // xQueueOverwrite(messageQueue,&testMessage)
-    // xQueueOverwriteFromISR(messageQueue, &testMessage,NULL);
+#define IRQPIN 32
+void IRAM_ATTR myIRQ(void *arg)
+{    
+    LOADreg();
+    
+    address = spi_ReadZ80AddressBusPolled();
+    
+    sendAddressISR(0,address);
+    
+    WAITreset();
+    
 }
 
 void configGPIO_IRQ(void)
@@ -71,7 +87,7 @@ void configGPIO_IRQ(void)
     gpio_config_t io_conf;
     io_conf.pin_bit_mask = 1ULL << pin;
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.intr_type = GPIO_INTR_LOW_LEVEL;
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
 

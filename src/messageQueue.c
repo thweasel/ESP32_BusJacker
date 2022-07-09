@@ -23,6 +23,15 @@ void sendMessage(int32_t ID, char *message)
     xQueueSend(messageQueue, (void *)&testMessage, 1);
 }
 
+void sendMessageISR(int32_t ID, char *message)
+{
+    AMessage testMessage;
+    testMessage.ucMessageID = ID;
+    strncpy(testMessage.ucData, message, 20);
+    xQueueSendFromISR(messageQueue, (void *)&testMessage, 1);
+}
+
+
 void sendAddress(int32_t ID, uint16_t address)
 {
     char chrAddr[6];
@@ -32,8 +41,21 @@ void sendAddress(int32_t ID, uint16_t address)
     testMessage.ucMessageID = ID;
     strcpy(testMessage.ucData, chrAddr);
     strcat(testMessage.ucData, "\n");
-    xQueueSend(messageQueue, &testMessage, 10);
+    xQueueSend(messageQueue, &testMessage, 1);
 }
+
+void sendAddressISR(int32_t ID, uint16_t address)
+{
+    char chrAddr[6];
+    itoa(address, chrAddr, 10);
+
+    AMessage testMessage;
+    testMessage.ucMessageID = ID;
+    strcpy(testMessage.ucData, chrAddr);
+    strcat(testMessage.ucData, "\n");
+    xQueueSendFromISR(messageQueue, &testMessage, 1);
+}
+
 
 //
 //  xQueue Message to Serial Port
@@ -86,7 +108,7 @@ static void task_SerialMessageReporter(void *arg)
         // else
         {
             // uart_tx_chars(ECHO_UART_PORT_NUM, "NADA\n", sizeof(char) * strnlen("NADA\n", 20));
-            sendMessage(1, "NADA\n");
+            //sendMessage(1, "NADA\n");
             vTaskDelay(50);
         }
     }
