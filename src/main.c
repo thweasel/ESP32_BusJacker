@@ -51,6 +51,7 @@ void app_main()
 
     configGPIO_IRQ();
 
+    WAITreset();
     while(1)
     {
         sendMessage(1,"tick\n");
